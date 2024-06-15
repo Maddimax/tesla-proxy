@@ -1,0 +1,3 @@
+#!/bin/bash
+# This is just a dummy script to have something to write against
+echo "This would run: " $@

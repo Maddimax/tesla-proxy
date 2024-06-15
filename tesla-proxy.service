@@ -1,0 +1,14 @@
+[Unit]
+Description=Tesla command proxy
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=mtillmanns
+ExecStart=/bin/bash /home/mtillmanns/tesla-proxyd
+WorkingDirectory=/home/mtillmanns
+
+[Install]
+WantedBy=multi-user.target
