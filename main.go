@@ -65,12 +65,30 @@ func withCarConnection(cb CarCallback, needsInfotainment bool) (error) {
 	return cb(car, ctx)
 }
 
-func handleFunc(w http.ResponseWriter, r *http.Request, cb CarCallback, needsInfotainment bool) {
-	err := withCarConnection(cb, needsInfotainment)
+type Handler struct {
+	sem semaphore.Weighted //.NewWeighted(int64(1))
+}
+
+func newHandler() *Handler {
+	return &Handler{sem: *semaphore.NewWeighted(int64(1))}
+}
+
+func (h *Handler) handleFunc(w http.ResponseWriter, r *http.Request, cb CarCallback, needsInfotainment bool) {
+	err := h.sem.Acquire(r.Context(), 1)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Println("Error: ", err)
+		fmt.Fprint(w, err)
+		return
+	}
+
+	defer h.sem.Release(1)
+	
+	err = withCarConnection(cb, needsInfotainment)
 
 	// We need to give the BLE device a second to recover for the next connection
 	// otherwise subsequent connections will fail.
-	time.Sleep(1 * time.Second) 
+	time.Sleep(1 * time.Second)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -78,7 +96,6 @@ func handleFunc(w http.ResponseWriter, r *http.Request, cb CarCallback, needsInf
 		fmt.Fprint(w, err)
 	} else {
 		w.WriteHeader(http.StatusOK)
-		fmt.Println("Success")
 		fmt.Fprint(w, "Success")
 	}
 }
@@ -86,12 +103,9 @@ func handleFunc(w http.ResponseWriter, r *http.Request, cb CarCallback, needsInf
 func main() {
 	mux := http.NewServeMux()
 
-	var sem = semaphore.NewWeighted(int64(1))
+	var h = newHandler()
 
-	mux.HandleFunc("/charging-set-amps", func(w http.ResponseWriter, r *http.Request) {
-		sem.Acquire(r.Context(), 1)
-		defer sem.Release(1)
-	
+	mux.HandleFunc("/charging-set-amps", func(w http.ResponseWriter, r *http.Request) {	
 		amps, _ := io.ReadAll(r.Body)
 		intAmps, err := strconv.Atoi(string(amps))
 		if err != nil {
@@ -100,54 +114,46 @@ func main() {
 			return
 		}
 
-		fmt.Print("Setting amps to: ", intAmps, " ...")
-		handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+		fmt.Println("Setting amps to: ", intAmps, " ...")
+		h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 			return v.SetChargingAmps(ctx, int32(intAmps))
 		}, true)
 	})
 
 	mux.HandleFunc("/charging-start", func(w http.ResponseWriter, r *http.Request) {
-		sem.Acquire(r.Context(), 1)
-		defer sem.Release(1)
-		fmt.Print("Starting charge ... ")
-		handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+		fmt.Println("Starting charge ... ")
+		h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 			return v.ChargeStart(ctx)
 		}, true)
 	})
 
 	mux.HandleFunc("/charging-stop", func(w http.ResponseWriter, r *http.Request) {
-		sem.Acquire(r.Context(), 1)
-		defer sem.Release(1)
-		fmt.Print("Stopping charge ...")
-		handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+		fmt.Println("Stopping charge ...")
+		h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 			return v.ChargeStop(ctx)
 		}, true)
 	})
 
 	mux.HandleFunc("/charging-start-stop", func(w http.ResponseWriter, r *http.Request) {
-		sem.Acquire(r.Context(), 1)
-		defer sem.Release(1)
 		v, _ := io.ReadAll(r.Body)
 		value := string(v)
 		if value == "start" || value == "true" || value == "on" || value == "1" {
-			fmt.Print("Starting charge ... ")
-			handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+			fmt.Println("Starting charge ... ")
+			h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 				return v.ChargeStart(ctx)
 			}, true)
 		}else {
-			fmt.Print("Stopping charge ... ")
-			handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+			fmt.Println("Stopping charge ... ")
+			h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 				return v.ChargeStop(ctx)
 			}, true)
 		}
 	})
 
 	mux.HandleFunc("/wake", func(w http.ResponseWriter, r *http.Request) {
-		sem.Acquire(r.Context(), 1)
-		defer sem.Release(1)
+		fmt.Println("Waking up car ...")
 
-		fmt.Print("Waking up car ...")
-		handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
+		h.handleFunc(w, r, func(v *vehicle.Vehicle, ctx context.Context) error {
 			return v.Wakeup(ctx)
 		},false)
 	})
